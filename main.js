@@ -1,72 +1,114 @@
-"use strict";
-if (typeof document !== "undefined") $(function(){
+/*jslint browser:true*/
 
+var unfriend;
+
+if (typeof document !== "undefined") $(function(){
+    "use strict";
+    
     $("#error").html("");  // clear the "Missing Javascript" error message
 
     var pod = crosscloud.connect();
-    var myMessages = [];
+    pod.requireLogin();
+    
+    var profile = {};
 
-    var sendHelloWorld = function () {
-        
-        var thisMessage = { isHelloWorld4: true,
-                            text: "Hello, World!",
-                            when: (new Date()).toISOString()
-                            // TODO add some link, like inspiredBy
-                          };
-        
-        var nick = $("#nick").val()
-        if (nick) thisMessage.fromNick = nick;
-        
-        myMessages.push(thisMessage);
-        pod.push(thisMessage);
-        
+    var source   = $("#contact-template").html();
+    var template = Handlebars.compile(source);
+
+    var showResults = function (results) {
+        useexpandResults(results);
+        console.log("painting", results);
+        var context = {contacts: results}
+        var html    = template(context);
+        $('#contacts').html(html);
+        $('#contacts').show();
     };
 
-    $("#helloButton").click(sendHelloWorld);
+    var contacts = {};
 
-    // allow the enter key to be a submit as well
-    $("#nick").keypress(function (e) {
-        if (e.which == 13) {
-            $("#helloButton").click();
-            return false;
-        }
-    });
+    var paint = function () {
+        var context = {contacts: contacts}
+        console.log("painting2", contacts);
+        var html    = template(context);
+        $('#contacts').html(html);
+        $('#contacts').show();
+    }
 
-    var show = 5;
-    var displayMessages = function (items) {
-        $("#out").html("<table id='results'><tr><th>when</th><th>who</th><th>link</th><th>pod (data server)</th></tr></table>");
-        var table = $("#results");
-        items.sort(function(a,b){return a.when<b.when?1:(a.when===b.when?0:-1)});
-        var count = 0;
-        items.forEach(function(item) {
-            count++;
-            if (count <= 5) {
-                var row = $("<tr>");
-                row.append($("<td>").text(item.when || "---"));
-                row.append($("<td>").text(item.fromNick || "(anon)"));
-                row.append($("<td>").html("<a href='"+item._id+"'>data</a>"));
-                row.append($("<td>").html("<a href='"+item._owner+"'>"+item._owner+"</a>"));
-                if (item._owner==pod.getUserId()) {
-                    row.append($("<td>").html("(you)"));
-                }
-                table.append(row)
-            }
-        });
-        if (count > show) {
-            $("#out").append("<p><i>("+(count-show)+" more not shown)</i></p>");
-        }
+    var appear = function (page) {
+        var c = { page: page };
+        contacts[page._id] = c
+        c.q1 = pod.query()
+            .filter( { _id: page._id } )
+            .on('AllResults', function (results) {
+                var newCopy = results[0];
+                c.page = newCopy;
+                paint();
+            })
+            .start();
+        c.q2 = pod.query()
+            .filter( { _id: page.siteURL } )
+            .on('AllResults', function (results) {
+                c.person = results[0];
+                paint();
+            })
+            .start();
+    }
+
+    var disappear = function (page) {
+        contacts[page._id].q1.stop();
+        contacts[page._id].q2.stop();
+        delete contacts[page._id];
+        paint();
+    }
+
+    unfriend = function (id) {
+        pod.delete({ _id: id});
     };
 
-    pod.onLogin(function () {
-        $("#out").html("waiting for data...");
-        pod.onLogout(function () {
-            $("#out").html("<i>not connected</i>");
-        });
+    pod.onLogin(function (userId) {
+        $('#notLoggedIn').hide();
+        
+        showMe(userId);
 
         pod.query()
-            .filter( { isHelloWorld4:true } )
-            .onAllResults(displayMessages)
+            .filter({ isContact: true,
+                      _owner: userId })
+            // .on('AllResults', showResults)
+            .on('Appear', appear)
+            .on('Disappear', disappear)
             .start();
+
+        // display No Contacts if nothing appears soon
+        setTimeout(paint, 250);
+
+    });
+
+    var me;
+    var showMe = function (userId) {
+        pod.query()
+            .filter({  _id: userId })
+            .on('AllResults', function (ar) {
+                me = ar[0];
+                $('#name').text(me.name);
+                $('#mypic').src=me.imageURL;
+                document.getElementById('mypic').src = me.imageURL;
+                $('#me').show()
+            })
+            .start();
+        
+    };
+
+    var addURL = $('#addURL');
+    addURL.keypress(function (e) {
+        console.log('x');
+        if (e.which == 13) { e.target.blur(); }
+    });
+    addURL.blur(function () {
+        console.log("add", addURL.val());
+        pod.push( { isContact:true,
+                    siteURL:addURL.val() } );
     });
 
 });
+
+
